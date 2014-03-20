@@ -17,6 +17,14 @@ function doBuild {
   cp -r data/* $1.app/Contents/
 }
 
+cd server
+go build .
+cd ..
+
+cd client
+go build .
+cd ..
+
 doBuild 'host'
 open host.app
 false
