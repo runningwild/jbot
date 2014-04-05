@@ -67,6 +67,41 @@ const (
 	DirLeft
 )
 
+func (d Direction) TurnLeft() Direction {
+	switch d {
+	case DirUp:
+		return DirLeft
+	case DirLeft:
+		return DirDown
+	case DirDown:
+		return DirRight
+	case DirRight:
+		return DirUp
+	}
+	panic(fmt.Sprintf("%v can't turn left.", d))
+}
+
+func (d Direction) TurnRight() Direction {
+	switch d {
+	case DirLeft:
+		return DirUp
+	case DirDown:
+		return DirLeft
+	case DirRight:
+		return DirDown
+	case DirUp:
+		return DirRight
+	}
+	panic(fmt.Sprintf("%v can't turn right.", d))
+}
+
+type Robot struct {
+	X, Y  int
+	Dir   Direction
+	Rebel bool
+	Index int
+}
+
 type Card int
 
 const (
@@ -99,9 +134,6 @@ func CardName(c Card) string {
 	default:
 		panic(fmt.Sprintf("Unknown card: %v\n", c))
 	}
-}
-
-type Robot struct {
 }
 
 func MakeHost(addr string, port int) (sgf.HostEngine, error) {
@@ -137,7 +169,6 @@ func MakeClient(addr string, port int) (sgf.ClientEngine, error) {
 	client.RegisterUpdate(LoadLevel{})
 	client.RegisterUpdate(StartRound{})
 	client.Start()
-	client.MakeRequest(Join{Rebels: make([]*RebelPlayer, 2)})
 	return client, nil
 }
 

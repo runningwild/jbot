@@ -1,0 +1,5 @@
+{
+  "Name": "reticle",
+  "Vertex_path": "shaders/vertex/standard.vs",
+  "Fragment_path": "shaders/fragment/reticle.fs"
+}

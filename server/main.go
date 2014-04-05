@@ -22,10 +22,9 @@ func main() {
 		if g.Rebels != nil {
 			fmt.Printf("Players are connected, load up a map.\n")
 			level := game.Level{}
-			level.Robots = make([]game.Robot, len(g.Rebels))
-			level.Tiles = make([][]game.Tile, 5)
+			level.Tiles = make([][]game.Tile, 25)
 			for i := range level.Tiles {
-				level.Tiles[i] = make([]game.Tile, 5)
+				level.Tiles[i] = make([]game.Tile, 25)
 				for j := range level.Tiles[i] {
 					tt := game.TileEmpty
 					if (i+j)%5 == 0 {
@@ -35,6 +34,19 @@ func main() {
 						Type: tt,
 					}
 				}
+			}
+			level.Robots = make([]game.Robot, len(g.Rebels))
+			for i := range level.Robots {
+				var x, y int = -1, -1
+				for (x == -1 && y == -1) || level.Tiles[x][y].Type != game.TileEmpty {
+					x = rand.Intn(len(level.Tiles))
+					y = rand.Intn(len(level.Tiles))
+				}
+				level.Robots[i].X = x
+				level.Robots[i].Y = y
+				level.Robots[i].Dir = game.DirUp
+				level.Robots[i].Rebel = true
+				level.Robots[i].Index = i
 			}
 			fmt.Printf("Unloacking...\n")
 			host.RUnlock()

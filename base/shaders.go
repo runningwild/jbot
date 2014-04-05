@@ -161,7 +161,10 @@ func InitShaders() {
 				var param gl.Int
 				gl.GetShaderiv(fragment_id, gl.COMPILE_STATUS, &param)
 				if param == 0 {
-					Error().Printf("Failed to compile fragment shader '%s': %v", shader.Fragment_path, param)
+					errBuf := make([]gl.Char, 500)
+					var errLength gl.Sizei
+					gl.GetShaderInfoLog(fragment_id, gl.Sizei(len(errBuf)), &errLength, &errBuf[0])
+					Error().Printf("Failed to compile fragment shader '%s': %s", shader.Fragment_path, gl.GoString(&errBuf[0]))
 					continue
 				}
 			}

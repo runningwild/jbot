@@ -24,6 +24,8 @@ func main() {
 	}
 	fmt.Printf("Connected with %v\n", client)
 
+	client.MakeRequest(game.Join{Rebels: make([]*game.RebelPlayer, 2)})
+
 	for {
 		time.Sleep(time.Second)
 		client.RLock()
