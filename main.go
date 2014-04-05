@@ -51,6 +51,7 @@ func mainLoop(client sgf.ClientEngine) {
 		gl.Enable(gl.BLEND)
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	})
+	console := base.MakeConsole(wdx, wdy)
 	for {
 		<-ticker
 		if gin.In().GetKey(gin.AnyEscape).FramePressCount() != 0 {
@@ -78,7 +79,7 @@ func mainLoop(client sgf.ClientEngine) {
 		client.RUnlock()
 		if mode == game.ModeWaiting {
 		} else if mode == game.ModeProgram {
-			programLoop(client)
+			programLoop(client, console)
 		} else if mode == game.ModeRun {
 
 		}
@@ -150,7 +151,7 @@ func renderCards(cards []game.Card, cardSize, x, y, cols int) {
 	}
 }
 
-func programLoop(client sgf.ClientEngine) {
+func programLoop(client sgf.ClientEngine, console *base.Console) {
 	ticker := time.Tick(time.Millisecond * 17)
 	cols := 7
 	sx, sy := 0, 0
@@ -187,6 +188,7 @@ func programLoop(client sgf.ClientEngine) {
 		}
 		sys.Think()
 		render.Queue(func() {
+			defer console.Draw(0, 0, wdx, wdy)
 			gl.Clear(gl.COLOR_BUFFER_BIT)
 			gl.Disable(gl.DEPTH_TEST)
 			gui.SetFontColor(1, 1, 1, 1)
