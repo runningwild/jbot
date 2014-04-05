@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"fmt"
@@ -8,6 +8,10 @@ import (
 )
 
 func main() {
+	Main()
+}
+
+func Main() {
 	host, err := game.MakeHost("127.0.0.1", 1231)
 	if err != nil {
 		fmt.Printf("Unable to start server: %v\n", err)

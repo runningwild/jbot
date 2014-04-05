@@ -9,6 +9,7 @@ import (
 	"github.com/runningwild/glop/render"
 	"github.com/runningwild/glop/system"
 	"github.com/runningwild/jbot/game"
+	"github.com/runningwild/jbot/server"
 	"github.com/runningwild/jbot/texture"
 	"github.com/runningwild/sgf"
 	"time"
@@ -212,6 +213,7 @@ func programLoop(client sgf.ClientEngine) {
 }
 
 func main() {
+	go server.Main()
 	sys.Startup()
 	err := gl.Init()
 	if err != nil {
