@@ -44,14 +44,13 @@ func init() {
 	base.SetDefaultKeyMap(key_map)
 }
 
-func mainLoop(client sgf.ClientEngine) {
+func mainLoop(client sgf.ClientEngine, controllers []gin.DeviceId, console *base.Console) {
 	client.MakeRequest(game.Join{Rebels: make([]*game.RebelPlayer, 2)})
 	ticker := time.Tick(time.Millisecond * 17)
 	render.Queue(func() {
 		gl.Enable(gl.BLEND)
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	})
-	console := base.MakeConsole(wdx, wdy)
 	for {
 		<-ticker
 		if gin.In().GetKey(gin.AnyEscape).FramePressCount() != 0 {
@@ -79,7 +78,7 @@ func mainLoop(client sgf.ClientEngine) {
 		client.RUnlock()
 		if mode == game.ModeWaiting {
 		} else if mode == game.ModeProgram {
-			programLoop(client, console)
+			programLoop(client, controllers, console)
 		} else if mode == game.ModeRun {
 
 		}
@@ -106,30 +105,32 @@ func renderBoard(g *game.Game, x, y, dx, dy int) {
 		}
 	}
 }
-func renderCardReticle(cardSize, cardX, cardY, x, y int) {
+func renderCardReticle(selected bool, cardSize, cardX, cardY, x, y int) {
+	base.Log().Printf("Rendering %d %d %d %d %d", cardSize, cardX, cardY, x, y)
 	cx := x + cardX*cardSize
 	cy := y + cardY*cardSize
 	base.EnableShader("reticle")
 	base.SetUniformF("reticle", "edge", 0.05)
 	base.SetUniformF("reticle", "size", 0.1)
-	base.SetUniformF("reticle", "coverage", 1.0)
-	gl.Color4ub(255, 255, 100, 200)
+	if selected {
+		base.SetUniformF("reticle", "coverage", 1.0)
+	} else {
+		base.SetUniformF("reticle", "coverage", 0.6)
+	}
 	texture.Render(float64(cx), float64(cy), float64(cardSize), float64(cardSize))
 	base.EnableShader("")
 }
-func renderCards(cards []game.Card, cardSize, x, y, cols int) {
+func renderCards(cards []game.Card, cardSize, ulx, uly, cols int, cs *cardSelections) {
 	gl.Enable(gl.TEXTURE_2D)
-	cx := x - cardSize
-	cy := y
-	col := 0
+	x, y := -1, 0
 	for i := range cards {
-		if col == cols {
-			col = 0
-			cx = x - cardSize
-			cy += cardSize
+		if x == cols-1 {
+			x = -1
+			y++
 		}
-		col++
-		cx += cardSize
+		x++
+		cx := cardSize * x
+		cy := cardSize * y
 		var tile *texture.Data
 		switch cards[i] {
 		case game.CardForward1:
@@ -147,44 +148,133 @@ func renderCards(cards []game.Card, cardSize, x, y, cols int) {
 		case game.CardUTurn:
 			tile = texture.LoadFromPath(filepath.Join(base.GetDataDir(), "textures/u-turn.png"))
 		}
-		tile.Render(float64(cx), float64(cy), float64(cardSize), float64(cardSize))
+		gl.Color4ub(255, 255, 255, 255)
+		tile.Render(float64(cx+ulx), float64(cy+uly), float64(cardSize), float64(cardSize))
+		if cs != nil && cs.used[i] != -1 {
+			setColorForIndex(cs.used[i])
+			renderCardReticle(true, cardSize, x, y, 400, 400)
+		}
 	}
 }
 
-func programLoop(client sgf.ClientEngine, console *base.Console) {
-	ticker := time.Tick(time.Millisecond * 17)
-	cols := 7
-	sx, sy := 0, 0
+type eventLogger struct{}
 
+func (el *eventLogger) HandleEventGroup(group gin.EventGroup) {
+	for _, event := range group.Events {
+		base.Log().Printf("%v\n", event)
+	}
+}
+func (el *eventLogger) Think() {}
+
+type cardSelection struct {
+	sx, sy  int
+	cards   []game.Card
+	indexes []int
+}
+type cardSelections struct {
+	players []cardSelection
+	cards   []game.Card
+	used    []int // -1 means unused
+	cols    int
+}
+
+const maxCardsPerProgram = 5
+
+func (cs *cardSelections) HandleChoose(playerIndex int) {
+	player := &cs.players[playerIndex]
+	index := player.sx + player.sy*cs.cols
+	if index < 0 || index >= len(cs.cards) {
+		panic("FUCK YOU!!")
+	}
+	if len(player.cards) >= maxCardsPerProgram {
+		return
+	}
+	if cs.used[index] == -1 {
+		cs.used[index] = playerIndex
+		player.cards = append(player.cards, cs.cards[index])
+		player.indexes = append(player.indexes, index)
+	}
+}
+
+func (cs *cardSelections) HandleDrop(playerIndex int) {
+	player := &cs.players[playerIndex]
+	index := player.sx + player.sy*cs.cols
+	if index < 0 || index >= len(cs.cards) {
+		panic("FUCK YOU!!")
+	}
+	if len(player.cards) > 0 {
+		cs.used[player.indexes[len(player.indexes)-1]] = -1
+		player.cards = player.cards[0 : len(player.cards)-1]
+		player.indexes = player.indexes[0 : len(player.indexes)-1]
+	}
+}
+
+func (cs *cardSelections) HandleMove(playerIndex int, dx, dy int) {
+	if playerIndex < 0 || playerIndex >= len(cs.players) {
+		panic("FUCK YOU")
+	}
+	player := &cs.players[playerIndex]
+	player.sx += dx
+	player.sy += dy
+	if player.sx < 0 {
+		player.sx = 0
+	}
+	if player.sx >= cs.cols {
+		player.sx = cs.cols - 1
+	}
+	if player.sy < 0 {
+		player.sy = 0
+	}
+	rows := (len(cs.cards)-1)/cs.cols + 1
+	if player.sy >= rows {
+		player.sy = rows - 1
+	}
+}
+
+func setColorForIndex(index int) {
+	switch index {
+	case 0:
+		gl.Color4ub(255, 0, 0, 200)
+	case 1:
+		gl.Color4ub(0, 255, 0, 200)
+	case 2:
+		gl.Color4ub(0, 0, 255, 200)
+	default:
+		gl.Color4ub(255, 0, 255, 200)
+	}
+}
+
+func programLoop(client sgf.ClientEngine, controllers []gin.DeviceId, console *base.Console) {
+	ticker := time.Tick(time.Millisecond * 17)
+	var selections cardSelections
+	selections.cols = 7
+	selections.players = make([]cardSelection, len(controllers))
 	client.RLock()
 	g := client.Game().(*game.Game)
-	var cards []game.Card
 	for _, card := range g.Cards {
-		cards = append(cards, card)
+		selections.cards = append(selections.cards, card)
+		selections.used = append(selections.used, -1)
 	}
 	client.RUnlock()
-
 	for {
 		<-ticker
 		if gin.In().GetKey(gin.AnyEscape).FramePressCount() != 0 {
 			return
 		}
-		sx -= gin.In().GetKey(gin.AnyKeyA).FramePressCount()
-		sx += gin.In().GetKey(gin.AnyKeyD).FramePressCount()
-		sy -= gin.In().GetKey(gin.AnyKeyW).FramePressCount()
-		sy += gin.In().GetKey(gin.AnyKeyS).FramePressCount()
-		if sx < 0 {
-			sx = 0
-		}
-		if sx >= cols {
-			sx = cols - 1
-		}
-		if sy < 0 {
-			sy = 0
-		}
-		rows := (len(cards)-1)/cols + 1
-		if sy >= rows {
-			sy = rows - 1
+		for i, device := range controllers {
+			up := gin.In().GetKeyFlat(gin.ControllerHatSwitchUp, device.Type, device.Index).FramePressCount()
+			down := gin.In().GetKeyFlat(gin.ControllerHatSwitchDown, device.Type, device.Index).FramePressCount()
+			left := gin.In().GetKeyFlat(gin.ControllerHatSwitchLeft, device.Type, device.Index).FramePressCount()
+			right := gin.In().GetKeyFlat(gin.ControllerHatSwitchRight, device.Type, device.Index).FramePressCount()
+			selections.HandleMove(i, right-left, down-up)
+			drop := gin.In().GetKeyFlat(gin.ControllerButton0+1, device.Type, device.Index).FramePressCount() > 0
+			choose := gin.In().GetKeyFlat(gin.ControllerButton0+2, device.Type, device.Index).FramePressCount() > 0
+			if choose {
+				selections.HandleChoose(i)
+			}
+			if drop {
+				selections.HandleDrop(i)
+			}
 		}
 		sys.Think()
 		render.Queue(func() {
@@ -204,8 +294,12 @@ func programLoop(client sgf.ClientEngine, console *base.Console) {
 			g := client.Game().(*game.Game)
 			renderBoard(g, 10, 10, 400, 400)
 			client.RUnlock()
-			renderCards(cards, 64, 400, 400, cols)
-			renderCardReticle(64, sx, sy, 400, 400)
+			renderCards(selections.cards, 64, 400, 400, selections.cols, &selections)
+			for i, player := range selections.players {
+				setColorForIndex(i)
+				renderCardReticle(false, 64, player.sx, player.sy, 400, 400)
+				renderCards(player.cards, 64, 400, 300-100*i, selections.cols, nil)
+			}
 		})
 		render.Queue(func() {
 			sys.SwapBuffers()
@@ -214,8 +308,97 @@ func programLoop(client sgf.ClientEngine, console *base.Console) {
 	}
 }
 
+type controllerTracker struct {
+	ids map[gin.DeviceId]bool
+}
+
+func (ct *controllerTracker) HandleEventGroup(group gin.EventGroup) {
+	if ct.ids == nil {
+		ct.ids = make(map[gin.DeviceId]bool)
+	}
+	if group.Events[0].Key.Id().Device.Type == gin.DeviceTypeController {
+		keyIndex := group.Events[0].Key.Id().Index
+		deviceId := group.Events[0].Key.Id().Device
+		switch keyIndex {
+		case (gin.ControllerButton0 + 1):
+			delete(ct.ids, deviceId)
+		case (gin.ControllerButton0 + 2):
+			ct.ids[deviceId] = group.Events[0].Key.IsDown()
+		default:
+			ct.ids[deviceId] = false
+		}
+	}
+}
+func (ct *controllerTracker) NumReady() int {
+	n := 0
+	for _, v := range ct.ids {
+		if v {
+			n++
+		}
+	}
+	return n
+}
+func (ct *controllerTracker) Ready() bool {
+	if len(ct.ids) == 0 {
+		return false
+	}
+	for _, v := range ct.ids {
+		if !v {
+			return false
+		}
+	}
+	return true
+}
+func (ct *controllerTracker) Think() {}
+
+func getPlayers(console *base.Console) []gin.DeviceId {
+	var ct controllerTracker
+	gin.In().RegisterEventListener(&ct)
+	defer gin.In().UnregisterEventListener(&ct)
+	ticker := time.Tick(time.Millisecond * 17)
+	start := time.Time{}
+	readyDuration := time.Second * 2
+	for start.IsZero() || time.Now().Sub(start) < readyDuration {
+		<-ticker
+		sys.Think()
+		if ct.Ready() && start.IsZero() {
+			start = time.Now()
+		}
+		if !ct.Ready() {
+			start = time.Time{}
+		}
+		render.Queue(func() {
+			defer console.Draw(0, 0, wdx, wdy)
+			gl.Clear(gl.COLOR_BUFFER_BIT)
+			gl.Disable(gl.DEPTH_TEST)
+			gui.SetFontColor(1, 1, 1, 1)
+			gl.Disable(gl.TEXTURE_2D)
+			gl.MatrixMode(gl.PROJECTION)
+			gl.LoadIdentity()
+			gl.Ortho(gl.Double(0), gl.Double(wdx), gl.Double(wdy), gl.Double(0), 1000, -1000)
+			gl.ClearColor(0, 0, 0, 1)
+			gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+			gl.MatrixMode(gl.MODELVIEW)
+			gl.LoadIdentity()
+			base.GetDictionary("crackin").RenderString(fmt.Sprintf("Num players: %d", len(ct.ids)), float64(wdx)/2, 300, 0, 100, gui.Center)
+			base.GetDictionary("crackin").RenderString(fmt.Sprintf("Num ready: %d", ct.NumReady()), float64(wdx)/2, 400, 0, 100, gui.Center)
+			if !start.IsZero() {
+				base.GetDictionary("crackin").RenderString(fmt.Sprintf("Starting in %2.2f", (readyDuration-time.Now().Sub(start)).Seconds()), float64(wdx)/2, 500, 0, 100, gui.Center)
+			}
+		})
+		render.Queue(func() {
+			sys.SwapBuffers()
+		})
+		render.Purge()
+	}
+	var devices []gin.DeviceId
+	for id := range ct.ids {
+		devices = append(devices, id)
+	}
+	return devices
+}
+
 func main() {
-	go server.Main()
 	sys.Startup()
 	err := gl.Init()
 	if err != nil {
@@ -231,6 +414,11 @@ func main() {
 	runtime.GOMAXPROCS(10)
 	sys.Think()
 
+	console := base.MakeConsole(wdx, wdy)
+	controllers := getPlayers(console)
+	base.Log().Printf("%v\n", controllers)
+	go server.Main()
+
 	base.LoadAllDictionaries()
 
 	client, err := game.MakeClient("127.0.0.1", 1231)
@@ -238,5 +426,5 @@ func main() {
 		base.Error().Printf("Unable to connect to server: %v\n", err)
 		return
 	}
-	mainLoop(client)
+	mainLoop(client, controllers, console)
 }
